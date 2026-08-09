@@ -248,11 +248,11 @@ tbody tr:hover{background:var(--paper-dark);}
 /* =========================================================================
    CONFIG — put your Supabase project values here before deploying to Netlify
    ========================================================================= */
-const SUPABASE_URL = "https://hogonzhgzuizejbjglcp.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvZ29uemhnenVpemVqYmpnbGNwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxOTM3NTgsImV4cCI6MjEwMTc2OTc1OH0.pZ94gWIz7wfewDMcRDpvrEPBIexWT41IkY6jzXa-5gM";
+const SUPABASE_URL = "https://YOUR-PROJECT.supabase.co";
+const SUPABASE_ANON_KEY = "YOUR-PUBLIC-ANON-KEY";
 
 // From LINE Developers Console > your channel > LIFF tab > LIFF ID
-const LIFF_ID = "2011027354-8eCOUiEx";
+const LIFF_ID = "YOUR-LIFF-ID";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -649,10 +649,11 @@ async function renderTxTable(){
   if(txCache.length===0){ wrap.innerHTML = '<div class="empty-state">ไม่พบรายการ ลองปรับเงื่อนไขการค้นหา</div>'; return; }
 
   wrap.innerHTML = `<table>
-    <thead><tr><th>วันที่</th><th>ประเภท</th><th>รายละเอียด</th><th>รายรับ</th><th>รายจ่าย</th><th>สลิป</th><th>พิมพ์</th></tr></thead>
+    <thead><tr><th>วันที่</th><th>ประเภท</th><th>รายละเอียด</th><th>รายรับ</th><th>รายจ่าย</th><th>สลิป</th><th>พิมพ์</th><th></th></tr></thead>
     <tbody>
       ${txCache.map(t=>{
         const cat = categories.find(c=>c.id===t.category_id);
+        const canDelete = currentUser.role === 'admin' || (currentUser.role === 'recorder' && t.created_by === currentUser.id);
         return `<tr>
           <td>${formatDate(t.date)}</td>
           <td><span class="pill ${t.type}">${t.type==='income'?cat?cat.name:'รายรับ':cat?cat.name:'รายจ่าย'}</span></td>
@@ -661,10 +662,21 @@ async function renderTxTable(){
           <td class="num amt-expense">${t.type==='expense'?fmt(t.amount):''}</td>
           <td>${t.slip_url ? `<button class="icon-btn" onclick="showSlip('${t.slip_url}')">📷</button>` : '-'}</td>
           <td><button class="icon-btn" onclick="showVoucher(${t.id})">🖨</button></td>
+          <td>${canDelete ? `<button class="icon-btn" title="ลบรายการ" onclick="deleteTx(${t.id})">🗑</button>` : ''}</td>
         </tr>`;
       }).join('')}
     </tbody>
   </table>`;
+}
+async function deleteTx(id){
+  const t = txCache.find(x=>x.id===id);
+  if(!t) return;
+  const label = t.type === 'income' ? 'รายรับ' : 'รายจ่าย';
+  if(!confirm(`ลบ${label} ${fmt(t.amount)} บาท (${t.description||'-'}) ?\nลบแล้วกู้คืนไม่ได้`)) return;
+  const { error } = await sb.from('transactions').delete().eq('id', id);
+  if(error){ toast('ลบไม่สำเร็จ: ' + error.message); return; }
+  toast('ลบรายการแล้ว');
+  renderTxTable();
 }
 function formatDate(d){
   if(!d) return '';
