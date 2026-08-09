@@ -604,9 +604,11 @@ async function submitTx(e, type){
 /* =========================================================================
    TRANSACTIONS LIST + SEARCH
    ========================================================================= */
+let txUsersCache = [];
 async function renderTransactions(){
   const main = document.getElementById('main-content');
   const { data: users } = await sb.from('users').select('id,name');
+  txUsersCache = users || [];
   main.innerHTML = `
     <div class="page-head"><div><h1>รายการทั้งหมด</h1><div class="sub">ค้นหาและตรวจสอบรายรับ-รายจ่ายทุกรายการ</div></div>
       <button class="btn small ghost" onclick="exportExcel(txCache)">⬇ Export Excel</button>
@@ -619,13 +621,14 @@ async function renderTransactions(){
           <select id="f-category"><option value="">ทั้งหมด</option>${categories.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select>
         </div>
         <div class="field"><label>ผู้บันทึก</label>
-          <select id="f-user"><option value="">ทั้งหมด</option>${(users||[]).map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}</select>
+          <select id="f-user"><option value="">ทั้งหมด</option>${txUsersCache.map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}</select>
         </div>
         <div class="field"><label>จำนวนเงินขั้นต่ำ</label><input type="number" id="f-amount"></div>
         <button class="btn small" onclick="renderTxTable()">🔍 ค้นหา</button>
       </div>
       <div id="tx-table-wrap"><span class="hint">กำลังโหลด…</span></div>
-    </div>`;
+    </div>
+    <div id="tx-edit-modal-slot"></div>`;
   renderTxTable();
 }
 
@@ -649,24 +652,73 @@ async function renderTxTable(){
   if(txCache.length===0){ wrap.innerHTML = '<div class="empty-state">ไม่พบรายการ ลองปรับเงื่อนไขการค้นหา</div>'; return; }
 
   wrap.innerHTML = `<table>
-    <thead><tr><th>วันที่</th><th>ประเภท</th><th>รายละเอียด</th><th>รายรับ</th><th>รายจ่าย</th><th>สลิป</th><th>พิมพ์</th><th></th></tr></thead>
+    <thead><tr><th>วันที่</th><th>ประเภท</th><th>รายละเอียด</th><th>ผู้บันทึก</th><th>รายรับ</th><th>รายจ่าย</th><th>สลิป</th><th>พิมพ์</th><th></th></tr></thead>
     <tbody>
       ${txCache.map(t=>{
         const cat = categories.find(c=>c.id===t.category_id);
-        const canDelete = currentUser.role === 'admin' || (currentUser.role === 'recorder' && t.created_by === currentUser.id);
+        const recorder = txUsersCache.find(u=>u.id===t.created_by);
+        const canEdit = currentUser.role === 'admin' || (currentUser.role === 'recorder' && t.created_by === currentUser.id);
         return `<tr>
           <td>${formatDate(t.date)}</td>
           <td><span class="pill ${t.type}">${t.type==='income'?cat?cat.name:'รายรับ':cat?cat.name:'รายจ่าย'}</span></td>
           <td>${t.description || ''}</td>
+          <td class="hint">${recorder ? recorder.name : '-'}</td>
           <td class="num amt-income">${t.type==='income'?fmt(t.amount):''}</td>
           <td class="num amt-expense">${t.type==='expense'?fmt(t.amount):''}</td>
           <td>${t.slip_url ? `<button class="icon-btn" onclick="showSlip('${t.slip_url}')">📷</button>` : '-'}</td>
           <td><button class="icon-btn" onclick="showVoucher(${t.id})">🖨</button></td>
-          <td>${canDelete ? `<button class="icon-btn" title="ลบรายการ" onclick="deleteTx(${t.id})">🗑</button>` : ''}</td>
+          <td>${canEdit ? `<button class="icon-btn" title="แก้ไข" onclick="openTxEditModal(${t.id})">✏️</button><button class="icon-btn" title="ลบรายการ" onclick="deleteTx(${t.id})">🗑</button>` : ''}</td>
         </tr>`;
       }).join('')}
     </tbody>
   </table>`;
+}
+function openTxEditModal(id){
+  const t = txCache.find(x=>x.id===id);
+  if(!t) return;
+  const cats = categories.filter(c=>c.type===t.type);
+  const partyLabel = t.type === 'income' ? 'ผู้รับเงิน' : 'ผู้จ่ายเงิน';
+  const slot = document.getElementById('tx-edit-modal-slot');
+  slot.innerHTML = `
+    <div class="modal-overlay show" id="tx-edit-modal">
+      <div class="modal-box">
+        <button class="modal-close" onclick="document.getElementById('tx-edit-modal-slot').innerHTML=''">✕</button>
+        <h3 style="margin-top:0;">แก้ไข${t.type==='income'?'รายรับ':'รายจ่าย'}</h3>
+        <form id="tx-edit-form">
+          <div class="form-grid">
+            <div class="field"><label>วันที่</label><input type="date" id="ed-date" value="${t.date}" required></div>
+            <div class="field"><label>หมวดหมู่</label>
+              <select id="ed-category">
+                <option value="">— ไม่ระบุ —</option>
+                ${cats.map(c=>`<option value="${c.id}" ${c.id===t.category_id?'selected':''}>${c.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field full"><label>รายละเอียด</label><input type="text" id="ed-desc" value="${(t.description||'').replace(/"/g,'&quot;')}"></div>
+            <div class="field"><label>จำนวนเงิน (บาท)</label><input type="number" step="0.01" min="0" id="ed-amount" value="${t.amount}" required></div>
+            <div class="field"><label>${partyLabel}</label><input type="text" id="ed-party" value="${(t.party||'').replace(/"/g,'&quot;')}"></div>
+          </div>
+          <p id="ed-error" style="color:var(--expense); font-size:13px; display:none;"></p>
+          <button type="submit" class="btn gold full">บันทึกการแก้ไข</button>
+        </form>
+      </div>
+    </div>`;
+  document.getElementById('tx-edit-form').addEventListener('submit', (e)=>saveTxEdit(e, id));
+}
+async function saveTxEdit(e, id){
+  e.preventDefault();
+  const date = document.getElementById('ed-date').value;
+  const category_id = document.getElementById('ed-category').value || null;
+  const description = document.getElementById('ed-desc').value.trim();
+  const amount = parseFloat(document.getElementById('ed-amount').value);
+  const party = document.getElementById('ed-party').value.trim();
+  const errEl = document.getElementById('ed-error');
+  errEl.style.display = 'none';
+
+  const { error } = await sb.from('transactions').update({ date, category_id, description, amount, party }).eq('id', id);
+  if(error){ errEl.textContent = 'บันทึกไม่สำเร็จ: ' + error.message; errEl.style.display='block'; return; }
+  document.getElementById('tx-edit-modal-slot').innerHTML = '';
+  toast('แก้ไขรายการแล้ว');
+  renderTxTable();
 }
 async function deleteTx(id){
   const t = txCache.find(x=>x.id===id);
