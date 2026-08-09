@@ -878,10 +878,10 @@ async function renderUsers(){
   const { data: users } = await sb.from('users').select('*').order('created_at');
   usersCache = users || [];
   main.innerHTML = `
-    <div class="page-head"><div><h1>ผู้ใช้งาน</h1><div class="sub">ผู้ใช้งานใหม่จะถูกเพิ่มอัตโนมัติเมื่อเปิดแอปผ่าน LINE ครั้งแรก โดยเริ่มต้นเป็น "ผู้ตรวจสอบ" (ดูได้อย่างเดียว) — เลื่อนสิทธิ์ให้บันทึกรายการได้ที่นี่</div></div></div>
+    <div class="page-head"><div><h1>ผู้ใช้งาน</h1><div class="sub">ผู้ใช้งานใหม่จะถูกเพิ่มอัตโนมัติเมื่อเปิดแอปผ่าน LINE ครั้งแรก โดยเริ่มต้นเป็น "ผู้ตรวจสอบ" (ดูได้อย่างเดียว) — เลื่อนสิทธิ์และแก้ไขข้อมูลของทุกคนได้ที่นี่</div></div></div>
     <div class="card">
       <table>
-        <thead><tr><th>ผู้ใช้งาน</th><th>สิทธิ์</th><th></th><th></th></tr></thead>
+        <thead><tr><th>ผู้ใช้งาน</th><th>สิทธิ์</th><th></th><th></th><th></th></tr></thead>
         <tbody>
           ${usersCache.map(u=>`<tr>
             <td><img class="avatar-sm" src="${u.picture_url||''}" alt="">${u.name||'-'}</td>
@@ -893,11 +893,50 @@ async function renderUsers(){
               </select>
             </td>
             <td>${u.id===currentUser.id ? '<span class="hint">คุณ</span>' : ''}</td>
+            <td><button class="icon-btn" title="แก้ไขชื่อ" onclick="openEditProfileModal('${u.id}')">✏️</button></td>
             <td>${u.id===currentUser.id ? '' : `<button class="icon-btn" title="ลบผู้ใช้งาน" onclick="deleteUser('${u.id}','${(u.name||'').replace(/'/g,"")}')">🗑</button>`}</td>
           </tr>`).join('')}
         </tbody>
       </table>
+    </div>
+    <div id="profile-edit-modal-slot"></div>`;
+}
+function openEditProfileModal(id){
+  const u = usersCache.find(x=>x.id===id);
+  if(!u) return;
+  const slot = document.getElementById('profile-edit-modal-slot');
+  slot.innerHTML = `
+    <div class="modal-overlay show" id="profile-edit-modal">
+      <div class="modal-box">
+        <button class="modal-close" onclick="document.getElementById('profile-edit-modal-slot').innerHTML=''">✕</button>
+        <h3 style="margin-top:0;">แก้ไขข้อมูลผู้ใช้งาน</h3>
+        <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+          <img class="avatar" src="${u.picture_url||''}" alt="">
+          <div class="hint">รูปโปรไฟล์ดึงจากบัญชี LINE โดยอัตโนมัติ แก้ไขได้แค่ชื่อ</div>
+        </div>
+        <form id="profile-edit-form">
+          <div class="field"><label>ชื่อที่แสดงในระบบ</label><input type="text" id="pe-name" value="${(u.name||'').replace(/"/g,'&quot;')}" required></div>
+          <p id="pe-error" style="color:var(--expense); font-size:13px; display:none;"></p>
+          <button type="submit" class="btn gold full">บันทึกการแก้ไข</button>
+        </form>
+      </div>
     </div>`;
+  document.getElementById('profile-edit-form').addEventListener('submit', (e)=>saveProfileEdit(e, id));
+}
+async function saveProfileEdit(e, id){
+  e.preventDefault();
+  const name = document.getElementById('pe-name').value.trim();
+  const errEl = document.getElementById('pe-error');
+  errEl.style.display = 'none';
+  const { error } = await sb.from('users').update({ name }).eq('id', id);
+  if(error){ errEl.textContent = 'บันทึกไม่สำเร็จ: ' + error.message; errEl.style.display='block'; return; }
+  document.getElementById('profile-edit-modal-slot').innerHTML = '';
+  if(id === currentUser.id){
+    currentUser.name = name;
+    document.getElementById('side-user-name').textContent = name;
+  }
+  toast('แก้ไขข้อมูลแล้ว');
+  renderUsers();
 }
 async function changeRole(id, role){
   const { error } = await sb.from('users').update({ role }).eq('id', id);
